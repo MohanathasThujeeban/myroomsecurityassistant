@@ -1,4 +1,4 @@
-# Smart Room Alert System (Python)
+# Thujee's Room sentinal (Python)
 
 This desktop app provides:
 

@@ -163,5 +163,7 @@ class BiometricsEngine:
         return signature
 
     @staticmethod
+    
     def body_distance(current: np.ndarray, reference: np.ndarray) -> float:
         return float(np.linalg.norm(current - reference))
+    
