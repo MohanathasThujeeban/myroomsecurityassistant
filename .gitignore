@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+venv/
+data/alerts/
+data/owner_profile.npz
+config/settings.json
