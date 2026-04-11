@@ -12,14 +12,14 @@ class AppConfig:
     owner_name: str = "Thujee"
     camera_index: int = 0
 
-    sender_email: str = ""
-    sender_app_password: str = ""
-    receiver_email: str = ""
+    sender_email: str = "thujeeforearn@gmail.com"
+    sender_app_password: str = "dwbs acdr xiub dwkn"
+    receiver_email: str = "thujeeforearn@gmail.com"
     smtp_server: str = "smtp.gmail.com"
     smtp_port: int = 587
 
     face_match_threshold: float = 0.48
-    body_match_threshold: float = 1.30
+    body_match_threshold: float = 0.45
 
     motion_pixel_threshold: int = 1800
     people_confidence_threshold: float = 0.6

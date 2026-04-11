@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -35,6 +35,15 @@ class SecurityMonitor:
         self._last_warning_time = 0.0
         self._last_greeting_time = 0.0
         self._previous_body_signature: Optional[np.ndarray] = None
+        self._frame_index = 0
+
+        self._person_cache_frames = 3
+        self._face_check_every_n_frames = 2
+        self._cached_person_detected = False
+        self._cached_person_box: Optional[Tuple[int, int, int, int]] = None
+        self._cached_person_confidence = 0.0
+        self._cached_face_owner = False
+        self._last_face_check_frame = -999
 
         self._bg_subtractor = cv2.createBackgroundSubtractorMOG2(
             history=300,
@@ -71,23 +80,64 @@ class SecurityMonitor:
         thresholded = cv2.medianBlur(thresholded, 5)
         return int(cv2.countNonZero(thresholded))
 
-    def _person_present(self, frame_bgr: np.ndarray) -> bool:
-        small = cv2.resize(frame_bgr, None, fx=0.65, fy=0.65)
-        _, weights = self._hog.detectMultiScale(
+    def _detect_person(
+        self,
+        frame_bgr: np.ndarray,
+    ) -> tuple[bool, Optional[Tuple[int, int, int, int]], float]:
+        detect_scale = 0.5
+        small = cv2.resize(
+            frame_bgr,
+            None,
+            fx=detect_scale,
+            fy=detect_scale,
+            interpolation=cv2.INTER_AREA,
+        )
+        boxes, weights = self._hog.detectMultiScale(
             small,
-            winStride=(4, 4),
+            winStride=(8, 8),
             padding=(8, 8),
-            scale=1.05,
+            scale=1.08,
         )
 
-        if len(weights) == 0:
-            return False
+        if len(boxes) == 0:
+            return False, None, 0.0
 
         confidence_values = np.asarray(weights).reshape(-1)
-        return bool(np.any(confidence_values >= self.config.people_confidence_threshold))
+        best_index = int(np.argmax(confidence_values))
+        best_confidence = float(confidence_values[best_index])
+
+        if best_confidence < self.config.people_confidence_threshold:
+            return False, None, best_confidence
+
+        sx, sy, sw, sh = [int(v) for v in boxes[best_index]]
+        x = int(sx / detect_scale)
+        y = int(sy / detect_scale)
+        w = int(sw / detect_scale)
+        h = int(sh / detect_scale)
+        return True, (x, y, w, h), best_confidence
+
+    def _get_person_state(
+        self,
+        frame_bgr: np.ndarray,
+    ) -> tuple[bool, Optional[Tuple[int, int, int, int]], float]:
+        should_refresh = (
+            self._frame_index <= 1
+            or self._frame_index % self._person_cache_frames == 0
+        )
+        if should_refresh:
+            detected, person_box, confidence = self._detect_person(frame_bgr)
+            self._cached_person_detected = detected
+            self._cached_person_box = person_box
+            self._cached_person_confidence = confidence
+
+        return (
+            self._cached_person_detected,
+            self._cached_person_box,
+            self._cached_person_confidence,
+        )
 
     def _is_owner_by_face(self, frame_bgr: np.ndarray) -> bool:
-        face_encodings = self._biometrics.extract_face_encodings(frame_bgr)
+        face_encodings = self._biometrics.extract_face_encodings(frame_bgr, scale=0.5)
         if not face_encodings:
             return False
 
@@ -102,19 +152,15 @@ class SecurityMonitor:
 
         return False
 
-    def _is_owner_by_body(self, frame_bgr: np.ndarray) -> bool:
-        current_signature = self._biometrics.extract_body_signature(frame_bgr)
-        if current_signature is None:
-            return False
-
-        distance = self._biometrics.body_distance(
-            current=current_signature,
-            reference=self.owner_profile.body_signature,
+    def _track_body_activity(
+        self,
+        frame_bgr: np.ndarray,
+        person_box: Optional[Tuple[int, int, int, int]],
+    ) -> tuple[str, Optional[np.ndarray]]:
+        body_signature = self._biometrics.extract_body_signature(
+            frame_bgr,
+            person_box=person_box,
         )
-        return distance <= self.config.body_match_threshold
-
-    def _track_body_activity(self, frame_bgr: np.ndarray) -> tuple[str, Optional[np.ndarray]]:
-        body_signature = self._biometrics.extract_body_signature(frame_bgr)
         if body_signature is None:
             return "pose not visible", None
 
@@ -197,22 +243,29 @@ class SecurityMonitor:
                     self._log("Camera frame read failed.")
                     continue
 
+                self._frame_index += 1
                 motion_pixels = self._motion_pixels(frame)
-                person_detected = self._person_present(frame)
+                person_detected, person_box, person_confidence = self._get_person_state(frame)
                 motion_detected = motion_pixels >= self.config.motion_pixel_threshold
                 body_activity = "not available"
                 body_signature: Optional[np.ndarray] = None
 
                 if person_detected:
-                    body_activity, body_signature = self._track_body_activity(frame)
+                    body_activity, body_signature = self._track_body_activity(frame, person_box)
                 else:
                     self._previous_body_signature = None
+                    self._cached_face_owner = False
+                    self._last_face_check_frame = -999
 
                 status_text = "No person"
                 status_color = (140, 140, 140)
 
                 if person_detected and motion_detected:
-                    face_owner = self._is_owner_by_face(frame)
+                    if self._frame_index - self._last_face_check_frame >= self._face_check_every_n_frames:
+                        self._cached_face_owner = self._is_owner_by_face(frame)
+                        self._last_face_check_frame = self._frame_index
+
+                    face_owner = self._cached_face_owner
 
                     if face_owner:
                         status_text = "Owner verified by face"
@@ -267,6 +320,16 @@ class SecurityMonitor:
                     frame,
                     f"Body activity: {body_activity}",
                     (16, 92),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.62,
+                    (230, 230, 230),
+                    2,
+                    cv2.LINE_AA,
+                )
+                cv2.putText(
+                    frame,
+                    f"Person confidence: {person_confidence:.2f}",
+                    (16, 122),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.62,
                     (230, 230, 230),
