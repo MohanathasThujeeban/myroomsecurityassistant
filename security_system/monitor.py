@@ -99,22 +99,66 @@ class SecurityMonitor:
             scale=1.08,
         )
 
-        if len(boxes) == 0:
-            return False, None, 0.0
+        best_confidence = 0.0
 
-        confidence_values = np.asarray(weights).reshape(-1)
-        best_index = int(np.argmax(confidence_values))
-        best_confidence = float(confidence_values[best_index])
+        if len(boxes) > 0:
+            confidence_values = (
+                np.asarray(weights).reshape(-1)
+                if len(weights)
+                else np.zeros(len(boxes), dtype=np.float32)
+            )
 
-        if best_confidence < self.config.people_confidence_threshold:
-            return False, None, best_confidence
+            best_index = 0
+            best_score = -1.0
+            for index, (x, y, w, h) in enumerate(boxes):
+                area_score = float(w * h)
+                confidence = float(confidence_values[index]) if index < len(confidence_values) else 0.0
+                score = area_score * (1.0 + max(confidence, 0.0))
+                if score > best_score:
+                    best_score = score
+                    best_index = index
+                    best_confidence = confidence
 
-        sx, sy, sw, sh = [int(v) for v in boxes[best_index]]
-        x = int(sx / detect_scale)
-        y = int(sy / detect_scale)
-        w = int(sw / detect_scale)
-        h = int(sh / detect_scale)
-        return True, (x, y, w, h), best_confidence
+            if best_confidence >= self.config.people_confidence_threshold:
+                sx, sy, sw, sh = [int(v) for v in boxes[best_index]]
+                x = int(sx / detect_scale)
+                y = int(sy / detect_scale)
+                w = int(sw / detect_scale)
+                h = int(sh / detect_scale)
+                return True, (x, y, w, h), best_confidence
+
+        fallback_box = self._infer_person_box_from_face(frame_bgr)
+        if fallback_box is not None:
+            fallback_confidence = max(0.05, self.config.people_confidence_threshold * 0.5)
+            return True, fallback_box, fallback_confidence
+
+        return False, None, best_confidence
+
+    def _infer_person_box_from_face(
+        self,
+        frame_bgr: np.ndarray,
+    ) -> Optional[Tuple[int, int, int, int]]:
+        face_box = self._biometrics.detect_primary_face_box(frame_bgr, scale=0.75)
+        if face_box is None:
+            return None
+
+        frame_h, frame_w = frame_bgr.shape[:2]
+        fx, fy, fw, fh = face_box
+
+        x = max(0, fx - int(0.9 * fw))
+        y = max(0, fy - int(0.7 * fh))
+        w = int(2.8 * fw)
+        h = int(4.6 * fh)
+
+        if x + w > frame_w:
+            w = frame_w - x
+        if y + h > frame_h:
+            h = frame_h - y
+
+        if w < 40 or h < 60:
+            return None
+
+        return x, y, w, h
 
     def _get_person_state(
         self,
@@ -138,6 +182,8 @@ class SecurityMonitor:
 
     def _is_owner_by_face(self, frame_bgr: np.ndarray) -> bool:
         face_encodings = self._biometrics.extract_face_encodings(frame_bgr, scale=0.5)
+        if not face_encodings:
+            face_encodings = self._biometrics.extract_face_encodings(frame_bgr, scale=1.0)
         if not face_encodings:
             return False
 
@@ -254,44 +300,41 @@ class SecurityMonitor:
                     body_activity, body_signature = self._track_body_activity(frame, person_box)
                 else:
                     self._previous_body_signature = None
-                    self._cached_face_owner = False
-                    self._last_face_check_frame = -999
+
+                if self._frame_index - self._last_face_check_frame >= self._face_check_every_n_frames:
+                    self._cached_face_owner = self._is_owner_by_face(frame)
+                    self._last_face_check_frame = self._frame_index
+
+                face_owner = self._cached_face_owner
 
                 status_text = "No person"
                 status_color = (140, 140, 140)
 
-                if person_detected and motion_detected:
-                    if self._frame_index - self._last_face_check_frame >= self._face_check_every_n_frames:
-                        self._cached_face_owner = self._is_owner_by_face(frame)
-                        self._last_face_check_frame = self._frame_index
+                if face_owner:
+                    status_text = "Owner verified by face"
+                    status_color = (0, 220, 0)
+                    self._maybe_greet_owner()
+                elif person_detected and motion_detected:
+                    body_owner = False
+                    if body_signature is not None:
+                        distance = self._biometrics.body_distance(
+                            current=body_signature,
+                            reference=self.owner_profile.body_signature,
+                        )
+                        body_owner = distance <= self.config.body_match_threshold
 
-                    face_owner = self._cached_face_owner
-
-                    if face_owner:
-                        status_text = "Owner verified by face"
+                    if body_owner:
+                        status_text = "Owner verified by body"
                         status_color = (0, 220, 0)
                         self._maybe_greet_owner()
                     else:
-                        body_owner = False
-                        if body_signature is not None:
-                            distance = self._biometrics.body_distance(
-                                current=body_signature,
-                                reference=self.owner_profile.body_signature,
-                            )
-                            body_owner = distance <= self.config.body_match_threshold
-
-                        if body_owner:
-                            status_text = "Owner verified by body"
-                            status_color = (0, 220, 0)
-                            self._maybe_greet_owner()
-                        else:
-                            status_text = "Unauthorized person detected"
-                            status_color = (0, 0, 255)
-                            self._handle_intruder(
-                                frame_bgr=frame,
-                                body_signature=body_signature,
-                                body_activity=body_activity,
-                            )
+                        status_text = "Unauthorized person detected"
+                        status_color = (0, 0, 255)
+                        self._handle_intruder(
+                            frame_bgr=frame,
+                            body_signature=body_signature,
+                            body_activity=body_activity,
+                        )
                 elif person_detected:
                     status_text = "Person detected"
                     status_color = (0, 180, 255)

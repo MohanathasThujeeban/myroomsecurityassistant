@@ -26,6 +26,45 @@ class BiometricsEngine:
             9,
         )
 
+    def detect_primary_face_box(
+        self,
+        frame_bgr: np.ndarray,
+        scale: float = 1.0,
+    ) -> Optional[Tuple[int, int, int, int]]:
+        if scale <= 0 or scale > 1.0:
+            scale = 1.0
+
+        if scale < 1.0:
+            frame_bgr = cv2.resize(
+                frame_bgr,
+                None,
+                fx=scale,
+                fy=scale,
+                interpolation=cv2.INTER_AREA,
+            )
+
+        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        face_locations = face_recognition.face_locations(rgb, model="hog")
+        if not face_locations:
+            return None
+
+        best = max(
+            face_locations,
+            key=lambda loc: max(loc[1] - loc[3], 0) * max(loc[2] - loc[0], 0),
+        )
+        top, right, bottom, left = [int(v) for v in best]
+        w = max(1, right - left)
+        h = max(1, bottom - top)
+
+        if scale < 1.0:
+            inv = 1.0 / scale
+            left = int(left * inv)
+            top = int(top * inv)
+            w = int(w * inv)
+            h = int(h * inv)
+
+        return left, top, w, h
+
     def extract_face_encodings(self, frame_bgr: np.ndarray, scale: float = 1.0) -> List[np.ndarray]:
         if scale <= 0 or scale > 1.0:
             scale = 1.0
