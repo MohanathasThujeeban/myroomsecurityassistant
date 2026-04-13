@@ -13,6 +13,14 @@ def owner_profile_exists(path: Path = DEFAULT_PROFILE_PATH) -> bool:
     return path.exists()
 
 
+def delete_owner_profile(path: Path = DEFAULT_PROFILE_PATH) -> bool:
+    if not path.exists():
+        return False
+
+    path.unlink()
+    return True
+
+
 def save_owner_profile(profile: OwnerProfile, path: Path = DEFAULT_PROFILE_PATH) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(

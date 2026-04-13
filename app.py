@@ -5,7 +5,13 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from security_system import load_config, load_owner_profile, owner_profile_exists, save_config
+from security_system import (
+    delete_owner_profile,
+    load_config,
+    load_owner_profile,
+    owner_profile_exists,
+    save_config,
+)
 from security_system.config import AppConfig
 from security_system.enrollment import enroll_owner
 from security_system.monitor import SecurityMonitor
@@ -44,10 +50,13 @@ class SecurityApp(tk.Tk):
         self.greeting_text_var = tk.StringVar()
         self.warning_text_var = tk.StringVar()
         self.status_var = tk.StringVar(value="System idle")
+        self.owner_profile_var = tk.StringVar(value="No owner profile found.")
+        self._pending_profile_refresh = False
 
         self._setup_theme()
         self._build_ui()
         self._load_initial_config()
+        self._refresh_owner_profile_view()
         self._set_status("System ready", tone="ok")
         self.after(150, self._flush_logs)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -393,6 +402,36 @@ class SecurityApp(tk.Tk):
             style="Hint.TLabel",
         ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
+        ttk.Separator(action_card).grid(row=3, column=0, columnspan=2, sticky="ew", pady=12)
+
+        ttk.Label(action_card, text="Single Owner Profile", style="SectionTitle.TLabel").grid(
+            row=4,
+            column=0,
+            columnspan=2,
+            sticky="w",
+        )
+        ttk.Label(
+            action_card,
+            textvariable=self.owner_profile_var,
+            style="Hint.TLabel",
+            justify=tk.LEFT,
+            wraplength=350,
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 10))
+
+        ttk.Button(
+            action_card,
+            text="Refresh Owner Data",
+            style="Neutral.TButton",
+            command=self._refresh_owner_profile_view,
+        ).grid(row=6, column=0, sticky="ew", padx=(0, 8))
+
+        ttk.Button(
+            action_card,
+            text="Delete Owner Data",
+            style="Danger.TButton",
+            command=self._delete_owner_profile,
+        ).grid(row=6, column=1, sticky="ew")
+
         log_card = ttk.LabelFrame(
             content,
             text="Activity Stream",
@@ -489,10 +528,74 @@ class SecurityApp(tk.Tk):
     def _enqueue_log(self, text: str) -> None:
         self._log_queue.put(text)
 
+    def _refresh_owner_profile_view(self) -> None:
+        if not owner_profile_exists():
+            self.owner_profile_var.set(
+                "No owner enrolled.\n"
+                "This app supports one owner only. Enroll one owner to create data."
+            )
+            return
+
+        try:
+            profile = load_owner_profile()
+        except Exception as exc:
+            self.owner_profile_var.set(f"Owner data could not be read: {exc}")
+            return
+
+        face_count = int(profile.face_encodings.shape[0])
+        body_vector_size = int(profile.body_signature.shape[0])
+        self.owner_profile_var.set(
+            f"Owner Name: {profile.owner_name}\n"
+            f"Created At: {profile.created_at}\n"
+            f"Face Samples: {face_count}\n"
+            f"Body Signature Size: {body_vector_size}"
+        )
+
+    def _delete_owner_profile(self) -> None:
+        if self.monitor and self.monitor.is_running:
+            messagebox.showwarning("Monitoring Active", "Stop monitoring before deleting owner data.")
+            self._set_status("Stop monitoring first", tone="warn")
+            return
+
+        if not owner_profile_exists():
+            messagebox.showinfo("No Owner Data", "Owner data was not found.")
+            self._set_status("Owner profile missing", tone="warn")
+            self._refresh_owner_profile_view()
+            return
+
+        confirmed = messagebox.askyesno(
+            "Delete Owner Data",
+            "This system supports one owner only.\n\n"
+            "Delete current owner name and biometric data?",
+        )
+        if not confirmed:
+            return
+
+        try:
+            deleted = delete_owner_profile()
+        except Exception as exc:
+            messagebox.showerror("Delete Failed", f"Could not delete owner data: {exc}")
+            self._enqueue_log(f"Delete owner data failed: {exc}")
+            self._set_status("Delete failed", tone="alert")
+            return
+
+        if deleted:
+            self._enqueue_log("Owner profile deleted.")
+            self._set_status("Owner profile deleted", tone="ok")
+        else:
+            self._enqueue_log("Owner profile already missing.")
+            self._set_status("Owner profile missing", tone="warn")
+
+        self._refresh_owner_profile_view()
+
     def _flush_logs(self) -> None:
         while not self._status_queue.empty():
             text, tone = self._status_queue.get_nowait()
             self._set_status(text, tone)
+
+        if self._pending_profile_refresh:
+            self._pending_profile_refresh = False
+            self._refresh_owner_profile_view()
 
         while not self._log_queue.empty():
             line = self._log_queue.get_nowait()
@@ -523,6 +626,15 @@ class SecurityApp(tk.Tk):
             self._set_status("Stop monitoring first", tone="warn")
             return
 
+        if owner_profile_exists():
+            messagebox.showwarning(
+                "Single Owner Mode",
+                "Only one owner profile is supported.\n\n"
+                "Delete current owner data from Operations -> Single Owner Profile, then enroll again.",
+            )
+            self._set_status("Delete existing owner first", tone="warn")
+            return
+
         try:
             cfg = self._build_config_from_form()
         except ValueError as exc:
@@ -542,6 +654,7 @@ class SecurityApp(tk.Tk):
                     logger=self._enqueue_log,
                 )
                 self._enqueue_log("Owner enrollment successful.")
+                self._pending_profile_refresh = True
                 self._queue_status("Owner profile ready", tone="ok")
             except Exception as exc:
                 self._enqueue_log(f"Enrollment failed: {exc}")

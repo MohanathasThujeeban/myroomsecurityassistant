@@ -8,7 +8,7 @@ import numpy as np
 
 from .biometrics import BiometricsEngine
 from .models import OwnerProfile
-from .storage import save_owner_profile
+from .storage import owner_profile_exists, save_owner_profile
 
 
 def enroll_owner(
@@ -19,6 +19,12 @@ def enroll_owner(
     max_duration_sec: int = 120,
     logger: Optional[Callable[[str], None]] = None,
 ) -> OwnerProfile:
+    if owner_profile_exists():
+        raise RuntimeError(
+            "Only one owner profile is supported. "
+            "Delete existing owner data before running enrollment again."
+        )
+
     def log(message: str) -> None:
         if logger:
             logger(message)

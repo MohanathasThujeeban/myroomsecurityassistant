@@ -292,7 +292,6 @@ class SecurityMonitor:
                 self._frame_index += 1
                 motion_pixels = self._motion_pixels(frame)
                 person_detected, person_box, person_confidence = self._get_person_state(frame)
-                motion_detected = motion_pixels >= self.config.motion_pixel_threshold
                 body_activity = "not available"
                 body_signature: Optional[np.ndarray] = None
 
@@ -314,30 +313,14 @@ class SecurityMonitor:
                     status_text = "Owner verified by face"
                     status_color = (0, 220, 0)
                     self._maybe_greet_owner()
-                elif person_detected and motion_detected:
-                    body_owner = False
-                    if body_signature is not None:
-                        distance = self._biometrics.body_distance(
-                            current=body_signature,
-                            reference=self.owner_profile.body_signature,
-                        )
-                        body_owner = distance <= self.config.body_match_threshold
-
-                    if body_owner:
-                        status_text = "Owner verified by body"
-                        status_color = (0, 220, 0)
-                        self._maybe_greet_owner()
-                    else:
-                        status_text = "Unauthorized person detected"
-                        status_color = (0, 0, 255)
-                        self._handle_intruder(
-                            frame_bgr=frame,
-                            body_signature=body_signature,
-                            body_activity=body_activity,
-                        )
                 elif person_detected:
-                    status_text = "Person detected"
-                    status_color = (0, 180, 255)
+                    status_text = "Unauthorized person detected"
+                    status_color = (0, 0, 255)
+                    self._handle_intruder(
+                        frame_bgr=frame,
+                        body_signature=body_signature,
+                        body_activity=body_activity,
+                    )
 
                 cv2.putText(
                     frame,
