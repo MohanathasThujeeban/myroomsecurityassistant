@@ -15,7 +15,6 @@ def enroll_owner(
     owner_name: str,
     camera_index: int = 0,
     min_face_samples: int = 20,
-    min_body_samples: int = 25,
     max_duration_sec: int = 120,
     logger: Optional[Callable[[str], None]] = None,
 ) -> OwnerProfile:
@@ -36,17 +35,18 @@ def enroll_owner(
         raise RuntimeError("Cannot access camera for enrollment.")
 
     face_samples = []
-    body_samples = []
     frame_index = 0
     started = time.time()
 
-    log("Enrollment started. Face the camera and show your upper body.")
+    log("Enrollment started. Face the camera clearly.")
 
     try:
         while True:
             ok, frame = capture.read()
             if not ok:
                 raise RuntimeError("Unable to read camera frame during enrollment.")
+
+            display_frame = cv2.flip(frame, 1)
 
             frame_index += 1
 
@@ -56,21 +56,14 @@ def enroll_owner(
                 break
 
             face_encodings = biometrics.extract_face_encodings(frame)
-            body_signature = biometrics.extract_body_signature(frame)
 
             # Sample every few frames to reduce near-duplicate captures.
             if face_encodings and frame_index % 4 == 0:
                 face_samples.append(face_encodings[0])
 
-            if body_signature is not None and frame_index % 3 == 0:
-                body_samples.append(body_signature)
-
-            message = (
-                f"Face samples: {len(face_samples)}/{min_face_samples} | "
-                f"Body samples: {len(body_samples)}/{min_body_samples}"
-            )
+            message = f"Face samples: {len(face_samples)}/{min_face_samples}"
             cv2.putText(
-                frame,
+                display_frame,
                 message,
                 (18, 32),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -80,7 +73,7 @@ def enroll_owner(
                 cv2.LINE_AA,
             )
             cv2.putText(
-                frame,
+                display_frame,
                 "Press Q to stop once both counts are complete.",
                 (18, 64),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -90,12 +83,9 @@ def enroll_owner(
                 cv2.LINE_AA,
             )
 
-            cv2.imshow("Owner Enrollment", frame)
+            cv2.imshow("Owner Enrollment", display_frame)
 
-            enough_samples = (
-                len(face_samples) >= min_face_samples
-                and len(body_samples) >= min_body_samples
-            )
+            enough_samples = len(face_samples) >= min_face_samples
 
             pressed = cv2.waitKey(1) & 0xFF
             if pressed == ord("q") and enough_samples:
@@ -113,19 +103,11 @@ def enroll_owner(
             "Try again in better lighting."
         )
 
-    if len(body_samples) < min_body_samples:
-        raise RuntimeError(
-            "Enrollment failed: not enough body samples captured. "
-            "Try stepping back so your full upper body is visible."
-        )
-
     face_matrix = np.vstack(face_samples).astype(np.float32)
-    body_reference = np.mean(np.vstack(body_samples), axis=0).astype(np.float32)
 
     profile = OwnerProfile(
         owner_name=owner_name,
         face_encodings=face_matrix,
-        body_signature=body_reference,
     )
 
     save_owner_profile(profile)
