@@ -46,7 +46,6 @@ class SecurityApp(tk.Tk):
         self.sender_password_var = tk.StringVar()
         self.receiver_email_var = tk.StringVar()
         self.face_threshold_var = tk.StringVar()
-        self.body_threshold_var = tk.StringVar()
         self.greeting_text_var = tk.StringVar()
         self.warning_text_var = tk.StringVar()
         self.status_var = tk.StringVar(value="System idle")
@@ -204,7 +203,7 @@ class SecurityApp(tk.Tk):
         ).grid(row=0, column=0, sticky="w")
         ttk.Label(
             header,
-            text="Premium control room for face-body identity, voice defense, and email intelligence.",
+            text="Premium control room for face identity, voice defense, and email intelligence.",
             style="SubTitle.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
@@ -309,16 +308,6 @@ class SecurityApp(tk.Tk):
             style="Form.TEntry",
             width=10,
         ).grid(row=8, column=1, sticky="ew", padx=(8, 14), pady=(10, 0))
-
-        ttk.Label(settings_card, text="Body Threshold", style="Field.TLabel").grid(
-            row=8, column=2, sticky="w", pady=(10, 0)
-        )
-        ttk.Entry(
-            settings_card,
-            textvariable=self.body_threshold_var,
-            style="Form.TEntry",
-            width=10,
-        ).grid(row=8, column=3, sticky="ew", padx=(8, 0), pady=(10, 0))
 
         ttk.Separator(settings_card).grid(row=9, column=0, columnspan=4, sticky="ew", pady=14)
 
@@ -471,7 +460,6 @@ class SecurityApp(tk.Tk):
         self.sender_password_var.set(cfg.sender_app_password)
         self.receiver_email_var.set(cfg.receiver_email)
         self.face_threshold_var.set(str(cfg.face_match_threshold))
-        self.body_threshold_var.set(str(cfg.body_match_threshold))
         self.greeting_text_var.set(cfg.owner_greeting_text)
         self.warning_text_var.set(cfg.warning_text)
 
@@ -499,9 +487,8 @@ class SecurityApp(tk.Tk):
 
         try:
             face_threshold = float(self.face_threshold_var.get().strip())
-            body_threshold = float(self.body_threshold_var.get().strip())
         except ValueError:
-            raise ValueError("Face and Body Threshold values must be valid numbers.")
+            raise ValueError("Face Threshold value must be a valid number.")
 
         sender_password = self.sender_password_var.get().replace(" ", "").strip()
         greeting = self.greeting_text_var.get().strip() or f"Welcome back {owner_name}"
@@ -520,7 +507,6 @@ class SecurityApp(tk.Tk):
             sender_app_password=sender_password,
             receiver_email=self.receiver_email_var.get().strip(),
             face_match_threshold=face_threshold,
-            body_match_threshold=body_threshold,
             owner_greeting_text=greeting,
             warning_text=warning,
         )
@@ -543,12 +529,10 @@ class SecurityApp(tk.Tk):
             return
 
         face_count = int(profile.face_encodings.shape[0])
-        body_vector_size = int(profile.body_signature.shape[0])
         self.owner_profile_var.set(
             f"Owner Name: {profile.owner_name}\n"
             f"Created At: {profile.created_at}\n"
-            f"Face Samples: {face_count}\n"
-            f"Body Signature Size: {body_vector_size}"
+            f"Face Samples: {face_count}"
         )
 
     def _delete_owner_profile(self) -> None:

@@ -2,10 +2,8 @@
 
 This desktop app provides:
 
-- Motion + person detection using webcam
-- Owner recognition by face (primary)
-- Owner recognition by body signature (fallback for masked/partial face)
-- Body activity classification (low/moderate/high movement)
+- Motion + face detection using webcam
+- Owner recognition by face
 - Voice greeting for owner: "Welcome back Thujee" (customizable)
 - Voice warning for unauthorized person (customizable)
 - Email alert with intruder photo attachment
@@ -13,7 +11,6 @@ This desktop app provides:
 ## Important Notes
 
 - This is a practical starter system, not military-grade security.
-- Body signature matching is a fallback heuristic and can produce false positives/negatives.
 - For best accuracy, enroll in good lighting and keep a consistent camera angle.
 
 ## 1) Requirements
@@ -52,8 +49,8 @@ Click **Save Settings**.
 ## 4) Enroll Owner Profile
 
 1. Click **Enroll Owner**.
-2. Look at the camera with clear face and upper body visible.
-3. The enrollment window collects multiple face and body samples.
+2. Look at the camera with a clear face.
+3. The enrollment window collects multiple face samples.
 4. It saves profile data to `data/owner_profile.npz`.
 
 ## 5) Start Monitoring
@@ -62,9 +59,7 @@ Click **Save Settings**.
 2. A live camera window opens.
 3. Behavior:
    - Owner face recognized -> greeting voice
-   - Owner face not clear/masked but body matches -> greeting voice
-  - Unauthorized person -> warning voice + email alert with captured image
-  - Unauthorized events also save body-signature snapshot as a `.npy` file beside the image
+  - Unauthorized face -> warning voice + email alert with captured image
 4. Press **Q** in video window or click **Stop Monitoring** in UI.
 
 ## 6) Files
